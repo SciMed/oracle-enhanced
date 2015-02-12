@@ -53,7 +53,7 @@ module ActiveRecord
     end
 
     # Specify which table columns should be typecasted to Date (without time), e.g.:
-    # 
+    #
     #   set_date_columns :created_on, :updated_on
     def self.set_date_columns(*args)
       connection.set_type_for_columns(table_name,:date,*args)
@@ -120,7 +120,7 @@ module ActiveRecord
     private
 
     def enhanced_write_lobs
-      if self.class.connection.is_a?(ConnectionAdapters::OracleEnhancedAdapter) && 
+      if self.class.connection.is_a?(ConnectionAdapters::OracleEnhancedAdapter) &&
           !(
             (self.class.custom_create_method || self.class.custom_create_method) ||
             (self.class.custom_update_method || self.class.custom_update_method)
@@ -505,7 +505,7 @@ module ActiveRecord
         index_name_length
       end
 
-      # the maximum length of an index name 
+      # the maximum length of an index name
       # supported by this database
       def index_name_length
         IDENTIFIER_MAX_LENGTH
@@ -596,7 +596,13 @@ module ActiveRecord
       def quote(value, column = nil) #:nodoc:
         if value && column
           case column.type
-          when :text, :binary
+          when :text
+            if value.empty?
+              %Q{empty_#{ type_to_sql(column.type.to_sym).downcase rescue 'blob' }()}
+            else
+              super
+            end
+          when :binary
             %Q{empty_#{ type_to_sql(column.type.to_sym).downcase rescue 'blob' }()}
           # NLS_DATE_FORMAT independent TIMESTAMP support
           when :timestamp
@@ -787,7 +793,7 @@ module ActiveRecord
             select NVL(max(#{quote_column_name(primary_key)}),0) + 1 from #{quote_table_name(table_name)}
           ", new_start_value)
 
-          execute ("DROP SEQUENCE #{quote_table_name(sequence_name)}") 
+          execute ("DROP SEQUENCE #{quote_table_name(sequence_name)}")
           execute ("CREATE SEQUENCE #{quote_table_name(sequence_name)} START WITH #{new_start_value}")
         end
       end
@@ -1154,16 +1160,16 @@ module ActiveRecord
             c = c.to_sql unless c.is_a?(String)
             # remove any ASC/DESC modifiers
             c.gsub(/\s+(ASC|DESC)\s*?/i, '')
-            }.reject(&:blank?).map.with_index { |c,i| 
-              "FIRST_VALUE(#{c}) OVER (PARTITION BY #{columns} ORDER BY #{c}) AS alias_#{i}__" 
+            }.reject(&:blank?).map.with_index { |c,i|
+              "FIRST_VALUE(#{c}) OVER (PARTITION BY #{columns} ORDER BY #{c}) AS alias_#{i}__"
             }
             [super].concat(order_columns).join(', ')
         end
-      end 
+      end
 
       def columns_for_distinct(columns, orders) #:nodoc:
-        # construct a valid columns name for DISTINCT clause, 
-        # ie. one that includes the ORDER BY columns, using FIRST_VALUE such that 
+        # construct a valid columns name for DISTINCT clause,
+        # ie. one that includes the ORDER BY columns, using FIRST_VALUE such that
         # the inclusion of these columns doesn't invalidate the DISTINCT
         #
         # It does not construct DISTINCT clause. Just return column names for distinct.
