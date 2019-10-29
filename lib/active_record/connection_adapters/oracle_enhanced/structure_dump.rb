@@ -104,7 +104,8 @@ module ActiveRecord #:nodoc:
           keys[uk['constraint_name']][uk['position']-1] = uk['column_name']
         end
         keys.map do |k,v|
-          "ALTER TABLE #{table.upcase} ADD CONSTRAINT #{k} UNIQUE (#{v.join(',')})"
+          quoted_column_names = v.map { |e| quote_column_name_or_expression(e) }.join(',')
+          "ALTER TABLE #{quote_table_name(table)} ADD CONSTRAINT #{quote_column_name(k)} UNIQUE (#{quoted_column_names})"
         end
       end
 
