@@ -7,6 +7,7 @@ module ActiveRecord #:nodoc:
           private
           alias_method_chain :tables, :oracle_enhanced
           alias_method_chain :indexes, :oracle_enhanced
+          alias_method_chain :foreign_keys, :oracle_enhanced
         end
       end
 
@@ -49,44 +50,15 @@ module ActiveRecord #:nodoc:
 
       def primary_key_trigger(table_name, stream)
         if @connection.respond_to?(:has_primary_key_trigger?) && @connection.has_primary_key_trigger?(table_name)
-          pk, pk_seq = @connection.pk_and_sequence_for(table_name)
+          pk, _pk_seq = @connection.pk_and_sequence_for(table_name)
           stream.print "  add_primary_key_trigger #{table_name.inspect}"
           stream.print ", primary_key: \"#{pk}\"" if pk != 'id'
           stream.print "\n\n"
         end
       end
 
-      def foreign_keys(table_name, stream)
-        if @connection.respond_to?(:foreign_keys) && (foreign_keys = @connection.foreign_keys(table_name)).any?
-          add_foreign_key_statements = foreign_keys.map do |foreign_key|
-            statement_parts = [ ('add_foreign_key ' + foreign_key.from_table.inspect) ]
-            statement_parts << foreign_key.to_table.inspect
-
-            if foreign_key.options[:columns].size == 1
-              column = foreign_key.options[:columns].first
-              if column != "#{foreign_key.to_table.singularize}_id"
-                statement_parts << ('column: ' + column.inspect)
-              end
-
-              if foreign_key.options[:references].first != 'id'
-                statement_parts << ('primary_key: ' + foreign_key.options[:references].first.inspect)
-              end
-            else
-              statement_parts << ('columns: ' + foreign_key.options[:columns].inspect)
-            end
-
-            statement_parts << ('name: ' + foreign_key.options[:name].inspect)
-            
-            unless foreign_key.options[:dependent].blank?
-              statement_parts << ('dependent: ' + foreign_key.options[:dependent].inspect)
-            end
-
-            '  ' + statement_parts.join(', ')
-          end
-
-          stream.puts add_foreign_key_statements.sort.join("\n")
-          stream.puts
-        end
+      def foreign_keys_with_oracle_enhanced(table_name, stream)
+        return foreign_keys_without_oracle_enhanced(table_name, stream)
       end
 
       def synonyms(stream)
@@ -149,16 +121,21 @@ module ActiveRecord #:nodoc:
 
           # first dump primary key column
           if @connection.respond_to?(:pk_and_sequence_for)
-            pk, pk_seq = @connection.pk_and_sequence_for(table)
+            pk, _pk_seq = @connection.pk_and_sequence_for(table)
           elsif @connection.respond_to?(:primary_key)
             pk = @connection.primary_key(table)
           end
-          
+
           tbl.print "  create_table #{table.inspect}"
-          
+
           # addition to make temporary option work
           tbl.print ", temporary: true" if @connection.temporary_table?(table)
-          
+
+          table_comments = @connection.table_comment(table)
+          unless table_comments.nil?
+            tbl.print ", comment: #{table_comments.inspect}"
+          end
+
           if columns.detect { |c| c.name == pk }
             if pk != 'id'
               tbl.print %Q(, primary_key: "#{pk}")
@@ -166,7 +143,7 @@ module ActiveRecord #:nodoc:
           else
             tbl.print ", id: false"
           end
-          tbl.print ", force: true"
+          tbl.print ", force: :cascade"
           tbl.puts " do |t|"
 
           # then dump all non-primary key columns

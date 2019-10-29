@@ -2,9 +2,11 @@ require 'delegate'
 
 begin
   require "oci8"
-rescue LoadError
-  # OCI8 driver is unavailable.
-  raise LoadError, "ERROR: ActiveRecord oracle_enhanced adapter could not load ruby-oci8 library. Please install ruby-oci8 gem."
+rescue LoadError => e
+  # OCI8 driver is unavailable or failed to load a required library.
+  raise LoadError, "ERROR: '#{e.message}'. "\
+    "ActiveRecord oracle_enhanced adapter could not load ruby-oci8 library. "\
+    "You may need install ruby-oci8 gem."
 end
 
 # check ruby-oci8 version
@@ -23,7 +25,9 @@ module ActiveRecord
       def initialize(config)
         @raw_connection = OCI8EnhancedAutoRecover.new(config, OracleEnhancedOCIFactory)
         # default schema owner
-        @owner = config[:username].to_s.upcase
+        @owner = config[:schema]
+        @owner ||= config[:username]
+        @owner = @owner.to_s.upcase
       end
 
       def raw_oci_connection
@@ -235,12 +239,12 @@ module ActiveRecord
 
       def typecast_result_value(value, get_lob_value)
         case value
-        when Fixnum, Bignum
+        when Integer
           value
         when String
           value
         when Float, BigDecimal
-          # return Fixnum or Bignum if value is integer (to avoid issues with _before_type_cast values for id attributes)
+          # return Integer if value is integer (to avoid issues with _before_type_cast values for id attributes)
           value == (v_to_i = value.to_i) ? v_to_i : value
         when OraNumber
           # change OraNumber value (returned in early versions of ruby-oci8 2.0.x) to BigDecimal
@@ -275,7 +279,7 @@ module ActiveRecord
           value.hour == 0 && value.min == 0 && value.sec == 0
         end
       end
-      
+
       def create_time_with_default_timezone(value)
         year, month, day, hour, min, sec, usec = case value
         when Time
@@ -295,7 +299,7 @@ module ActiveRecord
       end
 
     end
-    
+
     # The OracleEnhancedOCIFactory factors out the code necessary to connect and
     # configure an Oracle/OCI connection.
     class OracleEnhancedOCIFactory #:nodoc:
@@ -304,6 +308,7 @@ module ActiveRecord
         username = config[:username] && config[:username].to_s
         password = config[:password] && config[:password].to_s
         database = config[:database] && config[:database].to_s
+        schema = config[:schema] && config[:schema].to_s
         host, port = config[:host], config[:port]
         privilege = config[:privilege] && config[:privilege].to_sym
         async = config[:allow_concurrency]
@@ -312,8 +317,11 @@ module ActiveRecord
         # get session time_zone from configuration or from TZ environment variable
         time_zone = config[:time_zone] || ENV['TZ']
 
+        # using a connection string via DATABASE_URL
+        connection_string = if host == 'connection-string'
+          database
         # connection using host, port and database name
-        connection_string = if host || port
+        elsif host || port
           host ||= 'localhost'
           host = "[#{host}]" if host =~ /^[^\[].*:/  # IPv6
           port ||= 1521
@@ -324,13 +332,13 @@ module ActiveRecord
         else
           database
         end
-
         conn = OCI8.new username, password, connection_string, privilege
         conn.autocommit = true
         conn.non_blocking = true if async
         conn.prefetch_rows = prefetch_rows
         conn.exec "alter session set cursor_sharing = #{cursor_sharing}" rescue nil
         conn.exec "alter session set time_zone = '#{time_zone}'" unless time_zone.blank?
+        conn.exec "alter session set current_schema = #{schema}" unless schema.blank?
 
         # Initialize NLS parameters
         OracleEnhancedAdapter::DEFAULT_NLS_PARAMETERS.each do |key, default_value|
@@ -342,8 +350,8 @@ module ActiveRecord
         conn
       end
     end
-    
-    
+
+
   end
 end
 

@@ -385,6 +385,18 @@ describe "OracleEnhancedAdapter schema definition" do
 
   end
 
+  describe "drop tables" do
+    before(:each) do
+      @conn = ActiveRecord::Base.connection
+    end
+
+    it "should drop table with :if_exists option no raise error" do
+      lambda do
+        @conn.drop_table("nonexistent_table", if_exists: true)
+      end.should_not raise_error
+    end
+  end
+
   describe "rename tables and sequences" do
     before(:each) do
       @conn = ActiveRecord::Base.connection
@@ -411,6 +423,7 @@ describe "OracleEnhancedAdapter schema definition" do
         drop_table :new_test_employees rescue nil
         drop_table :test_employees_no_pkey rescue nil
         drop_table :new_test_employees_no_pkey rescue nil
+        drop_table :aaaaaaaaaaaaaaaaaaaaaaaaaaa rescue nil
       end
     end
 
@@ -426,10 +439,10 @@ describe "OracleEnhancedAdapter schema definition" do
       end.should raise_error
     end
 
-    it "should raise error when new sequence name length is too long" do
+    it "should not raise error when new sequence name length is too long" do
       lambda do
         @conn.rename_table("test_employees","a"*27)
-      end.should raise_error
+      end.should_not raise_error
     end
 
     it "should rename table when table has no primary key and sequence" do
@@ -615,25 +628,28 @@ end
     end
 
     it "should add foreign key" do
+      fk_name = "fk_rails_#{Digest::SHA256.hexdigest("test_comments_test_post_id_fk").first(10)}"
+
       schema_define do
         add_foreign_key :test_comments, :test_posts
       end
       lambda do
         TestComment.create(:body => "test", :test_post_id => 1)
-      end.should raise_error() {|e| e.message.should =~ /ORA-02291.*\.TEST_COMMENTS_TEST_POST_ID_FK/}
+      end.should raise_error() {|e| e.message.should =~ /ORA-02291.*\.#{fk_name}/i}
     end
 
     context "with table_name_prefix" do
       let(:table_name_prefix) { 'xxx_' }
 
       it "should use table_name_prefix for foreign table" do
+        fk_name = "fk_rails_#{Digest::SHA256.hexdigest("xxx_test_comments_test_post_id_fk").first(10)}"
         schema_define do
           add_foreign_key :test_comments, :test_posts
         end
 
         lambda do
           TestComment.create(:body => "test", :test_post_id => 1)
-        end.should raise_error() {|e| e.message.should =~ /ORA-02291.*\.XXX_TES_COM_TES_POS_ID_FK/}
+        end.should raise_error() {|e| e.message.should =~ /ORA-02291.*\.#{fk_name}/i}
       end
     end
 
@@ -641,13 +657,14 @@ end
       let(:table_name_suffix) { '_xxx' }
 
       it "should use table_name_suffix for foreign table" do
+        fk_name = "fk_rails_#{Digest::SHA256.hexdigest("test_comments_xxx_test_post_id_fk").first(10)}"
         schema_define do
           add_foreign_key :test_comments, :test_posts
         end
 
         lambda do
           TestComment.create(:body => "test", :test_post_id => 1)
-        end.should raise_error() {|e| e.message.should =~ /ORA-02291.*\.TES_COM_XXX_TES_POS_ID_FK/}
+        end.should raise_error() {|e| e.message.should =~ /ORA-02291.*\.#{fk_name}/i}
       end
     end
 
@@ -666,7 +683,8 @@ end
       end
       lambda do
         TestComment.create(:body => "test", :test_post_id => 1)
-      end.should raise_error() {|e| e.message.should =~ /ORA-02291.*\.TES_COM_TES_POS_ID_FOR_KEY/}
+      end.should raise_error() {|e| e.message.should =~
+        /ORA-02291.*\.C#{Digest::SHA1.hexdigest("test_comments_test_post_id_foreign_key")[0,29].upcase}/}
     end
 
     it "should add foreign key with very long name which is shortened" do
@@ -680,12 +698,14 @@ end
     end
 
     it "should add foreign key with column" do
+      fk_name = "fk_rails_#{Digest::SHA256.hexdigest("test_comments_post_id_fk").first(10)}"
+
       schema_define do
         add_foreign_key :test_comments, :test_posts, :column => "post_id"
       end
       lambda do
         TestComment.create(:body => "test", :post_id => 1)
-      end.should raise_error() {|e| e.message.should =~ /ORA-02291.*\.TEST_COMMENTS_POST_ID_FK/}
+      end.should raise_error() {|e| e.message.should =~ /ORA-02291.*\.#{fk_name}/i}
     end
 
     it "should add foreign key with delete dependency" do
@@ -709,6 +729,7 @@ end
     end
 
     it "should add a composite foreign key" do
+      skip "Composite foreign keys are not supported in this version"
       schema_define do
         add_column :test_posts, :baz_id, :integer
         add_column :test_posts, :fooz_id, :integer
@@ -731,6 +752,7 @@ end
     end
 
     it "should add a composite foreign key with name" do
+      skip "Composite foreign keys are not supported in this version"
       schema_define do
         add_column :test_posts, :baz_id, :integer
         add_column :test_posts, :fooz_id, :integer
@@ -781,6 +803,92 @@ end
       end.should_not raise_error
     end
 
+  end
+
+  describe "lob in table definition" do
+    before do
+      class ::TestPost < ActiveRecord::Base
+      end
+    end
+    it 'should use default tablespace for clobs' do
+      ActiveRecord::ConnectionAdapters::OracleEnhancedAdapter.default_tablespaces[:clob] = DATABASE_NON_DEFAULT_TABLESPACE
+      ActiveRecord::ConnectionAdapters::OracleEnhancedAdapter.default_tablespaces[:blob] = nil
+      schema_define do
+        create_table :test_posts, :force => true do |t|
+          t.text :test_clob
+          t.binary :test_blob
+        end
+      end
+      TestPost.connection.select_value("SELECT tablespace_name FROM user_lobs WHERE table_name='TEST_POSTS' and column_name = 'TEST_CLOB'").should == DATABASE_NON_DEFAULT_TABLESPACE
+      TestPost.connection.select_value("SELECT tablespace_name FROM user_lobs WHERE table_name='TEST_POSTS' and column_name = 'TEST_BLOB'").should_not == DATABASE_NON_DEFAULT_TABLESPACE
+    end
+
+    it 'should use default tablespace for blobs' do
+      ActiveRecord::ConnectionAdapters::OracleEnhancedAdapter.default_tablespaces[:blob] = DATABASE_NON_DEFAULT_TABLESPACE
+      ActiveRecord::ConnectionAdapters::OracleEnhancedAdapter.default_tablespaces[:clob] = nil
+      schema_define do
+        create_table :test_posts, :force => true do |t|
+          t.text :test_clob
+          t.binary :test_blob
+        end
+      end
+      TestPost.connection.select_value("SELECT tablespace_name FROM user_lobs WHERE table_name='TEST_POSTS' and column_name = 'TEST_BLOB'").should == DATABASE_NON_DEFAULT_TABLESPACE
+      TestPost.connection.select_value("SELECT tablespace_name FROM user_lobs WHERE table_name='TEST_POSTS' and column_name = 'TEST_CLOB'").should_not == DATABASE_NON_DEFAULT_TABLESPACE
+    end
+
+    after do
+      Object.send(:remove_const, "TestPost")
+      schema_define do
+        drop_table :test_posts rescue nil
+      end
+    end
+  end
+
+  describe "primary key in table definition" do
+    before do
+      @conn = ActiveRecord::Base.connection
+
+      class ::TestPost < ActiveRecord::Base
+      end
+    end
+
+    it 'should use default tablespace for primary key' do
+      ActiveRecord::ConnectionAdapters::OracleEnhancedAdapter.default_tablespaces[:index] = nil
+      schema_define do
+        create_table :test_posts, :force => true
+      end
+
+      index_name = @conn.select_value(
+        "SELECT index_name FROM all_constraints
+            WHERE table_name = 'TEST_POSTS'
+            AND constraint_type = 'P'
+            AND owner = SYS_CONTEXT('userenv', 'current_schema')")
+
+      expect(TestPost.connection.select_value("SELECT tablespace_name FROM user_indexes WHERE index_name = '#{index_name}'")).to eq('USERS')
+    end
+
+    it 'should use non default tablespace for primary key' do
+      ActiveRecord::ConnectionAdapters::OracleEnhancedAdapter.default_tablespaces[:index] = DATABASE_NON_DEFAULT_TABLESPACE
+      schema_define do
+        create_table :test_posts, :force => true
+      end
+
+      index_name = @conn.select_value(
+        "SELECT index_name FROM all_constraints
+            WHERE table_name = 'TEST_POSTS'
+            AND constraint_type = 'P'
+            AND owner = SYS_CONTEXT('userenv', 'current_schema')")
+
+      expect(TestPost.connection.select_value("SELECT tablespace_name FROM user_indexes WHERE index_name = '#{index_name}'")).to eq(DATABASE_NON_DEFAULT_TABLESPACE)
+    end
+
+    after do
+      Object.send(:remove_const, "TestPost")
+      schema_define do
+        drop_table :test_posts rescue nil
+      end
+      ActiveRecord::ConnectionAdapters::OracleEnhancedAdapter.default_tablespaces[:index] = nil
+    end
   end
 
   describe "foreign key in table definition" do
@@ -1008,7 +1116,7 @@ end
         end
       end
       class ::TestPost < ActiveRecord::Base; end
-      TestPost.columns_hash['title'].null.should be_false
+      TestPost.columns_hash['title'].null.should be false
     end
 
     after(:each) do
@@ -1022,7 +1130,7 @@ end
         change_column :test_posts, :title, :string, :null => true
       end
       TestPost.reset_column_information
-      TestPost.columns_hash['title'].null.should be_true
+      TestPost.columns_hash['title'].null.should be true
     end
 
     it "should add column" do
@@ -1098,7 +1206,7 @@ end
 
   describe 'virtual columns in create_table' do
     before(:each) do
-      pending "Not supported in this database version" unless @oracle11g_or_higher
+      skip "Not supported in this database version" unless @oracle11g_or_higher
     end
 
     it 'should create virtual column with old syntax' do
@@ -1144,7 +1252,7 @@ end
 
   describe 'virtual columns' do
     before(:each) do
-      pending "Not supported in this database version" unless @oracle11g_or_higher
+      skip "Not supported in this database version" unless @oracle11g_or_higher
       expr = "( numerator/NULLIF(denominator,0) )*100"
       schema_define do
         create_table :test_fractions, :force => true do |t|
@@ -1345,6 +1453,13 @@ end
       end
       ActiveRecord::ConnectionAdapters::OracleEnhancedAdapter.default_tablespaces.delete(:index)
       @would_execute_sql.should =~ /CREATE +INDEX .* ON .* \(.*\) TABLESPACE #{DATABASE_NON_DEFAULT_TABLESPACE}/
+    end
+
+    it "should create unique function index but not create unique constraints" do
+      schema_define do
+        add_index :keyboards, 'lower(name)', unique: true, name: :index_keyboards_on_lower_name
+      end
+      @would_execute_sql.should_not =~ /ALTER +TABLE .* ADD CONSTRAINT .* UNIQUE \(.*\(.*\)\)/
     end
 
     describe "#initialize_schema_migrations_table" do

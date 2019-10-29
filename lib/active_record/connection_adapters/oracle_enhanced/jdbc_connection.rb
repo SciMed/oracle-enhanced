@@ -26,10 +26,6 @@ begin
       # check any compatible JDBC driver in the priority order
       ojdbc_jars.any? do |ojdbc_jar|
         if File.exists?(file_path = File.join(dir, ojdbc_jar))
-          if java_version >= '1.8'
-            puts "WARNING: JDK #{java_version} is not officially supported by #{ojdbc_jar}"
-            puts "See http://www.oracle.com/technetwork/database/enterprise-edition/jdbc-faq-090281.html#01_03 for supported versions"
-          end
           require file_path
           true
         end
@@ -113,8 +109,9 @@ module ActiveRecord
           host, port = config[:host], config[:port]
           privilege = config[:privilege] && config[:privilege].to_s
 
-          # connection using TNS alias
-          if database && !host && !config[:url] && ENV['TNS_ADMIN']
+          # connection using TNS alias, or connection-string from DATABASE_URL
+          using_tns_alias = !host && !config[:url] && ENV['TNS_ADMIN']
+          if database && (using_tns_alias || host == 'connection-string')
             url = "jdbc:oracle:thin:@#{database}"
           else
             unless database.match(/^(\:|\/)/)
@@ -163,8 +160,14 @@ module ActiveRecord
 
         self.autocommit = true
 
-        # default schema owner
-        @owner = username.upcase unless username.nil?
+        schema = config[:schema] && config[:schema].to_s
+        if schema.blank?
+          # default schema owner
+          @owner = username.upcase unless username.nil?
+        else
+          exec "alter session set current_schema = #{schema}"
+          @owner = schema
+        end
 
         @raw_connection
       end
@@ -529,6 +532,8 @@ module ActiveRecord
           else
             BigDecimal.new(d.stringValue)
           end
+        when :BINARY_FLOAT
+          rset.getFloat(i)
         when :VARCHAR2, :CHAR, :LONG, :NVARCHAR2, :NCHAR
           rset.getString(i)
         when :DATE

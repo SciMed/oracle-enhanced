@@ -16,7 +16,7 @@ describe "OracleEnhancedConnection" do
     end
 
     it "should ping active connection" do
-      @conn.ping.should be_true
+      @conn.ping.should be true
     end
 
     it "should not ping inactive connection" do
@@ -31,6 +31,30 @@ describe "OracleEnhancedConnection" do
 
     it "should be in autocommit mode after connection" do
       @conn.should be_autocommit
+    end
+
+  end
+
+  describe "create connection with schema option" do
+    before(:all) do
+      @conn = ActiveRecord::ConnectionAdapters::OracleEnhancedConnection.create(CONNECTION_WITH_SCHEMA_PARAMS)
+    end
+
+    before(:each) do
+      @conn = ActiveRecord::ConnectionAdapters::OracleEnhancedConnection.create(CONNECTION_WITH_SCHEMA_PARAMS) unless @conn.active?
+    end
+
+    it "should create new connection" do
+      @conn.should be_active
+    end
+
+    it "should swith to specified schema" do
+      @conn.select_value("select SYS_CONTEXT('userenv', 'current_schema') from dual").should == CONNECTION_WITH_SCHEMA_PARAMS[:schema].upcase
+    end
+
+    it "should swith to specified schema after reset" do
+      @conn.reset!
+      @conn.select_value("select SYS_CONTEXT('userenv', 'current_schema') from dual").should == CONNECTION_WITH_SCHEMA_PARAMS[:schema].upcase
     end
 
   end
@@ -86,6 +110,23 @@ describe "OracleEnhancedConnection" do
     end
   end
 
+  describe 'with host="connection-string"' do
+    let(:username) { CONNECTION_PARAMS[:username] }
+    let(:password) { CONNECTION_PARAMS[:password] }
+    let(:connection_string) { "(DESCRIPTION=(ADDRESS_LIST=(ADDRESS=(PROTOCOL=tcp)(HOST=#{DATABASE_HOST})(PORT=#{DATABASE_PORT})))(CONNECT_DATA=(SERVICE_NAME=#{DATABASE_NAME})))" }
+    let(:params) { { username: username, password: password, host: 'connection-string', database: connection_string } }
+
+    it 'uses the database param as the connection string' do
+      if ORACLE_ENHANCED_CONNECTION == :jdbc
+        expect(java.sql.DriverManager).to receive(:getConnection).with("jdbc:oracle:thin:@#{connection_string}", anything).and_call_original
+      else
+        expect(OCI8).to receive(:new).with(username, password, connection_string, nil).and_call_original
+      end
+      conn = ActiveRecord::ConnectionAdapters::OracleEnhancedConnection.create(params)
+      expect(conn).to be_active
+    end
+  end
+
   if defined?(RUBY_ENGINE) && RUBY_ENGINE == 'jruby'
 
     describe "create JDBC connection" do
@@ -125,7 +166,7 @@ describe "OracleEnhancedConnection" do
           import 'org.apache.commons.dbcp.PoolableConnectionFactory'
           import 'org.apache.commons.dbcp.DriverManagerConnectionFactory'
         rescue NameError => e
-          return pending e.message
+          return skip e.message
         end
 
         class InitialContextMock
@@ -146,7 +187,7 @@ describe "OracleEnhancedConnection" do
           end
         end
 
-        javax.naming.InitialContext.stub!(:new).and_return(InitialContextMock.new)
+        javax.naming.InitialContext.stub(:new).and_return(InitialContextMock.new)
 
         params = {}
         params[:jndi] = 'java:comp/env/jdbc/test'
@@ -161,7 +202,7 @@ describe "OracleEnhancedConnection" do
       params[:url] = "jdbc:oracle:thin:@#{DATABASE_HOST && "//#{DATABASE_HOST}#{DATABASE_PORT && ":#{DATABASE_PORT}"}/"}#{DATABASE_NAME}"
       params[:host] = nil
       params[:database] = nil
-      java.sql.DriverManager.stub!(:getConnection).and_raise('no suitable driver found')
+      java.sql.DriverManager.stub(:getConnection).and_raise('no suitable driver found')
       @conn = ActiveRecord::ConnectionAdapters::OracleEnhancedConnection.create(params)
       @conn.should be_active
     end
@@ -227,7 +268,7 @@ describe "OracleEnhancedConnection" do
 
     it "should execute prepared statement with decimal bind parameter " do
       cursor = @conn.prepare("INSERT INTO test_employees VALUES(:1)")
-      column = ActiveRecord::ConnectionAdapters::OracleEnhancedColumn.new('age', nil, 'NUMBER(10,2)')
+      column = ActiveRecord::ConnectionAdapters::OracleEnhancedColumn.new('age', nil, ActiveRecord::Type::Decimal.new, 'NUMBER(10,2)')
       column.type.should == :decimal
       cursor.bind_param(1, "1.5", column)
       cursor.exec

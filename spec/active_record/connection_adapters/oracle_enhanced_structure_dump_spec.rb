@@ -92,6 +92,7 @@ describe "OracleEnhancedAdapter structure dump" do
     end
     
     it "should dump composite foreign keys" do
+      skip "Composite foreign keys are not supported in this version"
       @conn.add_column :foos, :fooz_id, :integer
       @conn.add_column :foos, :baz_id, :integer
       
@@ -149,7 +150,7 @@ describe "OracleEnhancedAdapter structure dump" do
     end
   
     it "should dump virtual columns" do
-      pending "Not supported in this database version" unless @oracle11g_or_higher
+      skip "Not supported in this database version" unless @oracle11g_or_higher
       @conn.execute <<-SQL
         CREATE TABLE bars (
           id          NUMBER(38,0) NOT NULL,
@@ -162,6 +163,7 @@ describe "OracleEnhancedAdapter structure dump" do
     end
 
     it "should dump RAW virtual columns" do
+      skip "Not supported in this database version" unless @oracle11g_or_higher
       @conn.execute <<-SQL
         CREATE TABLE bars (
           id          NUMBER(38,0) NOT NULL,
@@ -222,6 +224,20 @@ describe "OracleEnhancedAdapter structure dump" do
       SQL
       dump = ActiveRecord::Base.connection.structure_dump
       dump.should =~ /CREATE TABLE \"BARS\" \(\n\"ID\" NUMBER\(38,0\) NOT NULL,\n \"SUPER\" RAW\(255\)/
+    end
+
+    it "should dump table comments" do
+      comment_sql = %Q(COMMENT ON TABLE "TEST_POSTS" IS 'Test posts with ''some'' "quotes"')
+      @conn.execute comment_sql
+      dump = ActiveRecord::Base.connection.structure_dump
+      dump.should =~ /#{comment_sql}/
+    end
+
+    it "should dump column comments" do
+      comment_sql = %Q(COMMENT ON COLUMN "TEST_POSTS"."TITLE" IS 'The title of the post with ''some'' "quotes"')
+      @conn.execute comment_sql
+      dump = ActiveRecord::Base.connection.structure_dump
+      dump.should =~ /#{comment_sql}/
     end
 
   end

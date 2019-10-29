@@ -11,7 +11,7 @@ describe "OracleEnhancedAdapter context index" do
         t.string :title
         t.text :body
         t.integer :comments_count
-        t.timestamps
+        t.timestamps null: true
         t.string :all_text, limit: 2 # will be used for multi-column index
       end
     end
@@ -23,7 +23,7 @@ describe "OracleEnhancedAdapter context index" do
         t.integer :post_id
         t.string :author
         t.text :body
-        t.timestamps
+        t.timestamps null: true
       end
     end
   end
@@ -103,7 +103,7 @@ describe "OracleEnhancedAdapter context index" do
 
     it "should not include text index secondary tables in user tables list" do
       @conn.add_context_index :posts, :title
-      @conn.tables.any?{|t| t =~ /^dr\$/i}.should be_false
+      @conn.tables.any?{|t| t =~ /^dr\$/i}.should be false
       @conn.remove_context_index :posts, :title
     end
 
@@ -166,6 +166,14 @@ describe "OracleEnhancedAdapter context index" do
         Post.contains(:title, "abc").to_a.should == [@post]
         @post.update_attributes!(title: "ghi")
         Post.contains(:title, "ghi").to_a.should == [@post]
+      end
+      @conn.remove_context_index :posts, :title
+    end
+
+    it "should use index when contains has schema_name.table_name syntax" do
+      @conn.add_context_index :posts, :title
+      @title_words.each do |word|
+        Post.contains('posts.title', word).to_a.should == [@post2, @post1]
       end
       @conn.remove_context_index :posts, :title
     end

@@ -1,5 +1,5 @@
 require 'spec_helper'
-require 'active_record/connection_adapters/oracle_enhanced_database_tasks'
+require 'active_record/connection_adapters/oracle_enhanced/database_tasks'
 require 'stringio'
 require 'tempfile'
 
@@ -42,27 +42,31 @@ describe "Oracle Enhanced adapter database tasks" do
     describe "drop" do
       before { ActiveRecord::Tasks::DatabaseTasks.drop(config) }
       it "drops all tables" do
-        ActiveRecord::Base.connection.table_exists?(:test_posts).should be_false
+        ActiveRecord::Base.connection.table_exists?(:test_posts).should be false
       end
     end
 
     describe "purge" do
       before { ActiveRecord::Tasks::DatabaseTasks.purge(config) }
       it "drops all tables" do
-        ActiveRecord::Base.connection.table_exists?(:test_posts).should be_false
+        ActiveRecord::Base.connection.table_exists?(:test_posts).should be false
         ActiveRecord::Base.connection.select_value("SELECT COUNT(*) FROM RECYCLEBIN").should == 0
       end
     end
 
     describe "structure" do
       let(:temp_file) { Tempfile.new(["oracle_enhanced", ".sql"]).path }
-      before { ActiveRecord::SchemaMigration.create_table }
+      before do
+        ActiveRecord::SchemaMigration.create_table
+        ActiveRecord::Base.connection.execute "INSERT INTO schema_migrations (version) VALUES ('20150101010000')"
+      end
 
       describe "structure_dump" do
         before { ActiveRecord::Tasks::DatabaseTasks.structure_dump(config, temp_file) }
-        it "dumps the database structure to a file" do
+        it "dumps the database structure to a file without the schema information" do
           contents = File.read(temp_file)
           contents.should include('CREATE TABLE "TEST_POSTS"')
+          contents.should_not include('INSERT INTO schema_migrations')
         end
       end
 
@@ -73,7 +77,7 @@ describe "Oracle Enhanced adapter database tasks" do
           ActiveRecord::Tasks::DatabaseTasks.structure_load(config, temp_file)
         end
         it "loads the database structure from a file" do
-          ActiveRecord::Base.connection.table_exists?(:test_posts).should be_true
+          ActiveRecord::Base.connection.table_exists?(:test_posts).should be true
         end
       end
 

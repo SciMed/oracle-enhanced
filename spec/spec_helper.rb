@@ -1,8 +1,17 @@
-require 'rubygems'
+require "rubygems"
 require "bundler"
+require "yaml"
 Bundler.setup(:default, :development)
 
 $:.unshift(File.expand_path('../../lib', __FILE__))
+config_path = File.expand_path('../spec_config.yaml', __FILE__)
+if File.exist?(config_path)
+  puts "==> Loading config from #{config_path}"
+  config = YAML.load_file(config_path)
+else
+  puts "==> Loading config from ENV or use default"
+  config = {"rails" => {}, "database" => {}}
+end
 
 require 'rspec'
 
@@ -13,10 +22,7 @@ elsif RUBY_ENGINE == 'jruby'
   puts "==> Running specs with JRuby version #{JRUBY_VERSION}"
 end
 
-ENV['RAILS_GEM_VERSION'] ||= '4.0-master'
 NO_COMPOSITE_PRIMARY_KEYS = true
-
-puts "==> Running specs with Rails version #{ENV['RAILS_GEM_VERSION']}"
 
 require 'active_record'
 
@@ -31,6 +37,8 @@ require 'logger'
 
 require 'active_record/connection_adapters/oracle_enhanced_adapter'
 require 'ruby-plsql'
+
+puts "==> Effective ActiveRecord version #{ActiveRecord::VERSION::STRING}"
 
 module LoggerSpecHelper
   def set_logger
@@ -109,12 +117,13 @@ module SchemaSpecHelper
   end
 end
 
-DATABASE_NAME = ENV['DATABASE_NAME'] || 'orcl'
-DATABASE_HOST = ENV['DATABASE_HOST']
-DATABASE_PORT = ENV['DATABASE_PORT']
-DATABASE_USER = ENV['DATABASE_USER'] || 'oracle_enhanced'
-DATABASE_PASSWORD = ENV['DATABASE_PASSWORD'] || 'oracle_enhanced'
-DATABASE_SYS_PASSWORD = ENV['DATABASE_SYS_PASSWORD'] || 'admin'
+DATABASE_NAME         = config["database"]["name"]         || ENV['DATABASE_NAME']         || 'orcl'
+DATABASE_HOST         = config["database"]["host"]         || ENV['DATABASE_HOST']         || "127.0.0.1"
+DATABASE_PORT         = config["database"]["port"]         || ENV['DATABASE_PORT']         || 1521
+DATABASE_USER         = config["database"]["user"]         || ENV['DATABASE_USER']         || 'oracle_enhanced'
+DATABASE_PASSWORD     = config["database"]["password"]     || ENV['DATABASE_PASSWORD']     || 'oracle_enhanced'
+DATABASE_SCHEMA       = config["database"]["schema"]       || ENV['DATABASE_SCHEMA']       || 'oracle_enhanced_schema'
+DATABASE_SYS_PASSWORD = config["database"]["sys_password"] || ENV['DATABASE_SYS_PASSWORD'] || 'admin'
 
 CONNECTION_PARAMS = {
   :adapter => "oracle_enhanced",
@@ -123,6 +132,16 @@ CONNECTION_PARAMS = {
   :port => DATABASE_PORT,
   :username => DATABASE_USER,
   :password => DATABASE_PASSWORD
+}
+
+CONNECTION_WITH_SCHEMA_PARAMS = {
+  :adapter => "oracle_enhanced",
+  :database => DATABASE_NAME,
+  :host => DATABASE_HOST,
+  :port => DATABASE_PORT,
+  :username => DATABASE_USER,
+  :password => DATABASE_PASSWORD,
+  :schema => DATABASE_SCHEMA
 }
 
 SYS_CONNECTION_PARAMS = {
@@ -144,11 +163,11 @@ SYSTEM_CONNECTION_PARAMS = {
   :password => DATABASE_SYS_PASSWORD
 }
 
-DATABASE_NON_DEFAULT_TABLESPACE = ENV['DATABASE_NON_DEFAULT_TABLESPACE'] || "SYSTEM"
+DATABASE_NON_DEFAULT_TABLESPACE = config["database"]["non_default_tablespace"] || ENV['DATABASE_NON_DEFAULT_TABLESPACE'] || "SYSTEM"
 
 # set default time zone in TZ environment variable
 # which will be used to set session time zone
-ENV['TZ'] ||= 'Europe/Riga'
+ENV['TZ'] ||= config["timezone"] || 'Europe/Riga'
 
 # ActiveRecord::Base.logger = Logger.new(STDOUT)
 

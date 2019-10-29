@@ -22,7 +22,7 @@ describe "OracleEnhancedAdapter schema dump" do
     schema_define do
       create_table :test_posts, options do |t|
         t.string :title
-        t.timestamps
+        t.timestamps null: true
       end
       add_index :test_posts, :title
     end
@@ -180,21 +180,21 @@ describe "OracleEnhancedAdapter schema dump" do
       schema_define do
         add_foreign_key :test_comments, :test_posts
       end
-      standard_dump.should =~ /add_foreign_key "test_comments", "test_posts", name: "test_comments_test_post_id_fk"/
+      standard_dump.should =~ /add_foreign_key "test_comments", "test_posts"/
     end
 
     it "should include foreign key with delete dependency in schema dump" do
       schema_define do
         add_foreign_key :test_comments, :test_posts, dependent: :delete
       end
-      standard_dump.should =~ /add_foreign_key "test_comments", "test_posts", name: "test_comments_test_post_id_fk", dependent: :delete/
+      standard_dump.should =~ /add_foreign_key "test_comments", "test_posts", on_delete: :cascade/
     end
 
     it "should include foreign key with nullify dependency in schema dump" do
       schema_define do
         add_foreign_key :test_comments, :test_posts, dependent: :nullify
       end
-      standard_dump.should =~ /add_foreign_key "test_comments", "test_posts", name: "test_comments_test_post_id_fk", dependent: :nullify/
+      standard_dump.should =~ /add_foreign_key "test_comments", "test_posts", on_delete: :nullify/
     end
 
     it "should not include foreign keys on ignored table names in schema dump" do
@@ -226,6 +226,7 @@ describe "OracleEnhancedAdapter schema dump" do
     end
 
     it "should include composite foreign keys" do
+      skip "Composite foreign keys are not supported in this version"
       schema_define do
         add_column :test_posts, :baz_id, :integer
         add_column :test_posts, :fooz_id, :integer
@@ -340,7 +341,7 @@ describe "OracleEnhancedAdapter schema dump" do
 
     it "should specify non-default tablespace in add index" do
       tablespace_name = @conn.default_tablespace
-      @conn.stub!(:default_tablespace).and_return('dummy')
+      @conn.stub(:default_tablespace).and_return('dummy')
       create_test_posts_table
       standard_dump.should =~ /add_index "test_posts", \["title"\], name: "index_test_posts_on_title", tablespace: "#{tablespace_name}"$/
     end
@@ -368,21 +369,18 @@ describe "OracleEnhancedAdapter schema dump" do
 
   describe 'virtual columns' do
     before(:all) do
-      if @oracle11g_or_higher
-        schema_define do
-          create_table :test_names, :force => true do |t|
-            t.string  :first_name
-            t.string  :last_name
-            t.virtual :full_name,        :as => "first_name || ', ' || last_name"
-            t.virtual :short_name,       :as => "COALESCE(first_name, last_name)", :type => :string, :limit => 300
-            t.virtual :abbrev_name,      :as => "SUBSTR(first_name,1,50) || ' ' || SUBSTR(last_name,1,1) || '.'", :type => "VARCHAR(100)"
-            t.virtual :name_ratio, :as=>'(LENGTH(first_name)/LENGTH(last_name))'
-            t.column  :full_name_length, :virtual, :as => "length(first_name || ', ' || last_name)", :type => :integer
-            t.virtual :field_with_leading_space, :as => "' ' || first_name || ' '", :limit => 300, :type => :string
-          end
+      skip "Not supported in this database version" unless @oracle11g_or_higher
+      schema_define do
+        create_table :test_names, :force => true do |t|
+          t.string :first_name
+          t.string :last_name
+          t.virtual :full_name,       :as => "first_name || ', ' || last_name"
+          t.virtual :short_name,      :as => "COALESCE(first_name, last_name)", :type => :string, :limit => 300
+          t.virtual :abbrev_name,     :as => "SUBSTR(first_name,1,50) || ' ' || SUBSTR(last_name,1,1) || '.'", :type => "VARCHAR(100)"
+          t.virtual :name_ratio,      :as => '(LENGTH(first_name)*10/LENGTH(last_name)*10)'
+          t.column :full_name_length, :virtual, :as => "length(first_name || ', ' || last_name)", :type => :integer
+          t.virtual :field_with_leading_space, :as => "' ' || first_name || ' '", :limit => 300, :type => :string
         end
-      else
-        pending "Not supported in this database version"
       end
     end
 
@@ -402,30 +400,13 @@ describe "OracleEnhancedAdapter schema dump" do
       end
     end
 
-    context "when number_datatype_coercion is :float" do
-      before { ActiveRecord::ConnectionAdapters::OracleEnhancedAdapter.stub(:number_datatype_coercion).and_return(:float) }
-
-      it 'should dump correctly' do
-        standard_dump.should =~ /t\.virtual "full_name",(\s*)limit: 512,(\s*)as: "\\"FIRST_NAME\\"\|\|', '\|\|\\"LAST_NAME\\"",(\s*)type: :string/
-        standard_dump.should =~ /t\.virtual "short_name",(\s*)limit: 300,(\s*)as:(.*),(\s*)type: :string/
-        standard_dump.should =~ /t\.virtual "full_name_length",(\s*)precision: 38,(\s*)scale: 0,(\s*)as:(.*),(\s*)type: :integer/
-        standard_dump.should =~ /t\.virtual "name_ratio",(\s*)as:(.*),(\s*)type: :float$/
-        standard_dump.should =~ /t\.virtual "abbrev_name",(\s*)limit: 100,(\s*)as:(.*),(\s*)type: :string/
-        standard_dump.should =~ /t\.virtual "field_with_leading_space",(\s*)limit: 300,(\s*)as: "' '\|\|\\"FIRST_NAME\\"\|\|' '",(\s*)type: :string/
-      end
-    end
-
-    context "when number_datatype_coercion is :decimal" do
-      before { ActiveRecord::ConnectionAdapters::OracleEnhancedAdapter.stub(:number_datatype_coercion).and_return(:decimal) }
-
-      it 'should dump correctly' do
-        standard_dump.should =~ /t\.virtual "full_name",(\s*)limit: 512,(\s*)as: "\\"FIRST_NAME\\"\|\|', '\|\|\\"LAST_NAME\\"",(\s*)type: :string/
-        standard_dump.should =~ /t\.virtual "short_name",(\s*)limit: 300,(\s*)as:(.*),(\s*)type: :string/
-        standard_dump.should =~ /t\.virtual "full_name_length",(\s*)precision: 38,(\s*)scale: 0,(\s*)as:(.*),(\s*)type: :integer/
-        standard_dump.should =~ /t\.virtual "name_ratio",(\s*)as:(.*)\"$/
-        standard_dump.should =~ /t\.virtual "abbrev_name",(\s*)limit: 100,(\s*)as:(.*),(\s*)type: :string/
-        standard_dump.should =~ /t\.virtual "field_with_leading_space",(\s*)limit: 300,(\s*)as: "' '\|\|\\"FIRST_NAME\\"\|\|' '",(\s*)type: :string/
-      end
+    it 'should dump correctly' do
+      standard_dump.should =~ /t\.virtual "full_name",(\s*)limit: 512,(\s*)as: "\\"FIRST_NAME\\"\|\|', '\|\|\\"LAST_NAME\\"",(\s*)type: :string/
+      standard_dump.should =~ /t\.virtual "short_name",(\s*)limit: 300,(\s*)as:(.*),(\s*)type: :string/
+      standard_dump.should =~ /t\.virtual "full_name_length",(\s*)precision: 38,(\s*)as:(.*),(\s*)type: :integer/
+      standard_dump.should =~ /t\.virtual "name_ratio",(\s*)as:(.*)\"$/ # no :type
+      standard_dump.should =~ /t\.virtual "abbrev_name",(\s*)limit: 100,(\s*)as:(.*),(\s*)type: :string/
+      standard_dump.should =~ /t\.virtual "field_with_leading_space",(\s*)limit: 300,(\s*)as: "' '\|\|\\"FIRST_NAME\\"\|\|' '",(\s*)type: :string/
     end
 
     context 'with column cache' do
@@ -471,160 +452,63 @@ describe "OracleEnhancedAdapter schema dump" do
     end
   end
 
-  describe "NUMBER columns" do
+  describe ":float datatype" do
+    before(:each) do
+      schema_define do
+        create_table :test_floats, force: true do |t|
+          t.float :hourly_rate
+        end
+      end
+    end
+
     after(:each) do
       schema_define do
-        drop_table "test_numbers"
+        drop_table :test_floats
       end
     end
 
-    let(:value_within_max_precision)    { (10 ** @conn.class::NUMBER_MAX_PRECISION) - 1 }
-    let(:value_exceeding_max_precision) { (10 ** @conn.class::NUMBER_MAX_PRECISION) + 1 }
+    it "should dump float type correctly" do
+      standard_dump.should =~ /t\.float "hourly_rate"$/
+    end
+  end
 
-    context "when using ActiveRecord::Schema.define and ActiveRecord::ConnectionAdapters::TableDefinition#float" do
-      before :each do
-        schema_define do
-          create_table :test_numbers, :force => true do |t|
-            t.float :value
-          end
-        end
-      end
-
-      context "when number_datatype_coercion is :float" do
-        before { ActiveRecord::ConnectionAdapters::OracleEnhancedAdapter.stub(:number_datatype_coercion).and_return(:float) }
-
-        it "should dump correctly" do
-          standard_dump.should =~ /t\.float "value"$/
-        end
-      end
-
-      context "when number_datatype_coercion is :decimal" do
-        before { ActiveRecord::ConnectionAdapters::OracleEnhancedAdapter.stub(:number_datatype_coercion).and_return(:decimal) }
-
-        it "should dump correctly" do
-          standard_dump.should =~ /t\.decimal "value"$/
+  describe "table comments" do
+    before(:each) do
+      schema_define do
+        create_table :test_table_comments, :comment => "this is a \"table comment\"!", force: true do |t|
+          t.string :blah
         end
       end
     end
 
-    context "when using handwritten 'CREATE_TABLE' SQL" do
-      before :each do
-        ActiveRecord::Base.establish_connection(CONNECTION_PARAMS)
-        @conn = ActiveRecord::Base.connection
-        @conn.execute <<-SQL
-          CREATE TABLE test_numbers (
-            id     NUMBER(#{@conn.class::NUMBER_MAX_PRECISION},0) PRIMARY KEY,
-            value  NUMBER
-          )
-        SQL
-        @conn.execute <<-SQL
-          CREATE SEQUENCE test_numbers_seq  MINVALUE 1
-            INCREMENT BY 1 START WITH 1 CACHE 20 NOORDER NOCYCLE
-        SQL
+    after(:each) do
+      schema_define do
+        drop_table :test_table_comments
       end
+    end
 
-      context "when number_datatype_coercion is :float" do
-        before { ActiveRecord::ConnectionAdapters::OracleEnhancedAdapter.stub(:number_datatype_coercion).and_return(:float) }
+    it "should dump table comments" do
+      standard_dump.should =~ /comment: "this is a \\"table comment\\"!"/
+    end
+  end
 
-        it "should dump correctly" do
-          standard_dump.should =~ /t\.float "value"$/
-        end
-
-        describe "ActiveRecord saving" do
-          before :each do
-            class ::TestNumber < ActiveRecord::Base
-              self.table_name = "test_numbers"
-            end
-          end
-
-          it "should allow saving of values within NUMBER_MAX_PRECISION" do
-            number = TestNumber.new(value: value_within_max_precision)
-            number.save!
-            number.reload
-            number.value.should eq(value_within_max_precision)
-          end
-
-          it "should allow saving of values larger than NUMBER_MAX_PRECISION" do
-            number = TestNumber.new(value: value_exceeding_max_precision)
-            number.save!
-            number.reload
-            number.value.should eq(value_exceeding_max_precision)
-          end
-
-          it "should be recreatable from dump and have same properties" do
-            # Simulating db:schema:dump & db:test:load
-            2.times do
-              create_table_dump = standard_dump[/(create_table.+?end)/m]
-
-              schema_define do
-                drop_table "test_numbers"
-              end
-
-              schema_define(&eval("-> * { #{create_table_dump} }"))
-            end
-
-            number = TestNumber.new(value: value_within_max_precision)
-            number.save!
-
-            number2 = TestNumber.new(value: value_exceeding_max_precision)
-            number2.save!
-          end
+  describe "column comments" do
+    before(:each) do
+      schema_define do
+        create_table :test_column_comments, force: true do |t|
+          t.string :blah, :comment => "this is a \"column comment\"!"
         end
       end
+    end
 
-      context "when number_datatype_coercion is :decimal" do
-        before { ActiveRecord::ConnectionAdapters::OracleEnhancedAdapter.stub(:number_datatype_coercion).and_return(:decimal) }
+    after(:each) do
+      schema_define do
+        drop_table :test_column_comments
+      end
+    end
 
-        it "should dump correctly" do
-          standard_dump.should =~ /t\.decimal "value"$/
-        end
-
-        describe "ActiveRecord saving" do
-          before :each do
-            class ::TestNumber < ActiveRecord::Base
-              self.table_name = "test_numbers"
-            end
-          end
-
-          it "should allow saving of values within NUMBER_MAX_PRECISION" do
-            number = TestNumber.new(value: value_within_max_precision)
-            number.save!
-            number.reload
-            number.value.should eq(value_within_max_precision)
-          end
-
-          it "should allow saving of values larger than NUMBER_MAX_PRECISION" do
-            number = TestNumber.new(value: value_exceeding_max_precision)
-            number.save!
-            number.reload
-            number.value.should eq(value_exceeding_max_precision)
-          end
-
-          it "should be recreatable from dump and have same properties" do
-            # Simulating db:schema:dump & db:test:load
-            2.times do |i|
-              create_table_dump = standard_dump[/(create_table.+?end)/m]
-
-              schema_define do
-                drop_table "test_numbers"
-              end
-
-              schema_define(&eval("-> * { #{create_table_dump} }"))
-            end
-
-            number = TestNumber.new(value: value_within_max_precision)
-            number.save!
-
-            # Raises 'ORA-01438' as :value column type isn't FLOAT'ish
-            number2 = TestNumber.new(value: value_exceeding_max_precision)
-            lambda do
-              number2.save!
-            end.should raise_error() { |e| e.message.should =~ /ORA-01438/ }
-          end
-        end
-      end # context (:decimal)
-
-    end # context (handwritten)
-  end # describe (NUMBER columns)
-
+    it "should dump column comments" do
+      standard_dump.should =~ /comment: "this is a \\"column comment\\"!"/
+    end
+  end
 end

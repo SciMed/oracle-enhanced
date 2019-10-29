@@ -30,7 +30,7 @@ describe "OracleEnhancedAdapter establish connection" do
     ActiveRecord::Base.connection.reconnect!
     ActiveRecord::Base.connection.should be_active
   end
-  
+
 end
 
 describe "OracleEnhancedAdapter" do
@@ -40,7 +40,7 @@ describe "OracleEnhancedAdapter" do
   before(:all) do
     ActiveRecord::Base.establish_connection(CONNECTION_PARAMS)
   end
-  
+
   describe "ignore specified table columns" do
     before(:all) do
       @conn = ActiveRecord::Base.connection
@@ -171,7 +171,7 @@ describe "OracleEnhancedAdapter" do
       end
 
       it 'should identify virtual columns as such' do
-        pending "Not supported in this database version" unless @oracle11g_or_higher
+        skip "Not supported in this database version" unless @oracle11g_or_higher
         te = TestEmployee.connection.columns('test_employees').detect(&:virtual?)
         te.name.should == 'full_name'
       end
@@ -274,11 +274,11 @@ describe "OracleEnhancedAdapter" do
     end
 
     it "should tell ActiveRecord that count distinct is supported" do
-      ActiveRecord::Base.connection.supports_count_distinct?.should be_true
+      ActiveRecord::Base.connection.supports_count_distinct?.should be true
     end
 
     it "should execute correct SQL COUNT DISTINCT statement" do
-      lambda { TestEmployee.count(:employee_id, :distinct => true) }.should_not raise_error
+      lambda { TestEmployee.distinct.count(:employee_id) }.should_not raise_error
     end
 
   end
@@ -345,56 +345,56 @@ describe "OracleEnhancedAdapter" do
     end
 
     it "should be valid with letters and digits" do
-      @adapter.valid_table_name?("abc_123").should be_true
+      @adapter.valid_table_name?("abc_123").should be true
     end
 
     it "should be valid with schema name" do
-      @adapter.valid_table_name?("abc_123.def_456").should be_true
+      @adapter.valid_table_name?("abc_123.def_456").should be true
     end
 
     it "should be valid with $ in name" do
-      @adapter.valid_table_name?("sys.v$session").should be_true
+      @adapter.valid_table_name?("sys.v$session").should be true
     end
 
     it "should be valid with upcase schema name" do
-      @adapter.valid_table_name?("ABC_123.DEF_456").should be_true
+      @adapter.valid_table_name?("ABC_123.DEF_456").should be true
     end
 
     it "should be valid with irregular schema name and database links" do
-      @adapter.valid_table_name?('abc$#_123.abc$#_123@abc$#@._123').should be_true
+      @adapter.valid_table_name?('abc$#_123.abc$#_123@abc$#@._123').should be true
     end
 
     it "should not be valid with two dots in name" do
-      @adapter.valid_table_name?("abc_123.def_456.ghi_789").should be_false
+      @adapter.valid_table_name?("abc_123.def_456.ghi_789").should be false
     end
 
     it "should not be valid with invalid characters" do
-      @adapter.valid_table_name?("warehouse-things").should be_false
+      @adapter.valid_table_name?("warehouse-things").should be false
     end
 
     it "should not be valid with for camel-case" do
-      @adapter.valid_table_name?("Abc").should be_false
-      @adapter.valid_table_name?("aBc").should be_false
-      @adapter.valid_table_name?("abC").should be_false
+      @adapter.valid_table_name?("Abc").should be false
+      @adapter.valid_table_name?("aBc").should be false
+      @adapter.valid_table_name?("abC").should be false
     end
-    
+
     it "should not be valid for names > 30 characters" do
-      @adapter.valid_table_name?("a" * 31).should be_false
+      @adapter.valid_table_name?("a" * 31).should be false
     end
-    
+
     it "should not be valid for schema names > 30 characters" do
-      @adapter.valid_table_name?(("a" * 31) + ".validname").should be_false
+      @adapter.valid_table_name?(("a" * 31) + ".validname").should be false
     end
-    
+
     it "should not be valid for database links > 128 characters" do
-      @adapter.valid_table_name?("name@" + "a" * 129).should be_false
+      @adapter.valid_table_name?("name@" + "a" * 129).should be false
     end
-    
+
     it "should not be valid for names that do not begin with alphabetic characters" do
-      @adapter.valid_table_name?("1abc").should be_false
-      @adapter.valid_table_name?("_abc").should be_false
-      @adapter.valid_table_name?("abc.1xyz").should be_false
-      @adapter.valid_table_name?("abc._xyz").should be_false
+      @adapter.valid_table_name?("1abc").should be false
+      @adapter.valid_table_name?("_abc").should be false
+      @adapter.valid_table_name?("abc.1xyz").should be false
+      @adapter.valid_table_name?("abc._xyz").should be false
     end
   end
 
@@ -457,10 +457,13 @@ describe "OracleEnhancedAdapter" do
 
       cc = CamelCase.create!(:name => "Foo", :foo => 2)
       cc.id.should_not be_nil
-    
+
       @conn.tables.should include("CamelCase")
     end
 
+    it "properly quotes database links" do
+      @conn.quote_table_name('asdf@some.link').should eq('"ASDF"@"SOME.LINK"')
+    end
   end
 
   describe "access table over database link" do
@@ -473,7 +476,7 @@ describe "OracleEnhancedAdapter" do
         t.string      :title
         # cannot update LOBs over database link
         t.string      :body
-        t.timestamps
+        t.timestamps null: true
       end
       @db_link_username = SYSTEM_CONNECTION_PARAMS[:username]
       @db_link_password = SYSTEM_CONNECTION_PARAMS[:password]
@@ -551,7 +554,7 @@ describe "OracleEnhancedAdapter" do
       @conn.create_table :foos, :temporary => true, :id => false do |t|
         t.integer :id
       end
-      @conn.temporary_table?("foos").should be_true
+      @conn.temporary_table?("foos").should be true
     end
   end
 
@@ -597,7 +600,7 @@ describe "OracleEnhancedAdapter" do
       posts.size.should == @ids.size
     end
 
-  end if ENV['RAILS_GEM_VERSION'] >= '3.1'
+  end
 
   describe "with statement pool" do
     before(:all) do
@@ -625,8 +628,8 @@ describe "OracleEnhancedAdapter" do
     end
 
     it "should clear older cursors when statement limit is reached" do
-      pk = TestPost.columns.find { |c| c.primary }
-      sub = @conn.substitute_at(pk, 0)
+      pk = TestPost.columns_hash[TestPost.primary_key]
+      sub = @conn.substitute_at(pk, 0).to_sql
       binds = [[pk, 1]]
 
       lambda {
@@ -638,8 +641,8 @@ describe "OracleEnhancedAdapter" do
 
     it "should cache UPDATE statements with bind variables" do
       lambda {
-        pk = TestPost.columns.find { |c| c.primary }
-        sub = @conn.substitute_at(pk, 0)
+        pk = TestPost.columns_hash[TestPost.primary_key]
+        sub = @conn.substitute_at(pk, 0).to_sql
         binds = [[pk, 1]]
         @conn.exec_update("UPDATE test_posts SET id = #{sub}", "SQL", binds)
       }.should change(@statements, :length).by(+1)
@@ -651,7 +654,7 @@ describe "OracleEnhancedAdapter" do
         @conn.exec_update("UPDATE test_posts SET id = 1", "SQL", binds)
       }.should_not change(@statements, :length)
     end
-  end if ENV['RAILS_GEM_VERSION'] >= '3.1'
+  end
 
   describe "explain" do
     before(:all) do
@@ -679,36 +682,114 @@ describe "OracleEnhancedAdapter" do
     end
 
     it "should explain query with binds" do
-      pk = TestPost.columns.find { |c| c.primary }
+      pk = TestPost.columns_hash[TestPost.primary_key]
       sub = @conn.substitute_at(pk, 0)
       explain = TestPost.where(TestPost.arel_table[pk.name].eq(sub)).bind([pk, 1]).explain
       explain.should include("Cost")
       explain.should include("INDEX UNIQUE SCAN")
     end
-  end if ENV['RAILS_GEM_VERSION'] >= '3.2'
+  end
 
-  describe ".is_integer_column?" do
+  describe "using offset and limit" do
     before(:all) do
-      @adapter = ActiveRecord::ConnectionAdapters::OracleEnhancedAdapter
+      @conn = ActiveRecord::Base.connection
+      @conn.execute "DROP TABLE test_employees" rescue nil
+      @conn.execute <<-SQL
+        CREATE TABLE test_employees (
+          id            NUMBER PRIMARY KEY,
+          sort_order    NUMBER(38,0),
+          first_name    VARCHAR2(20),
+          last_name     VARCHAR2(25),
+          updated_at    DATE,
+          created_at    DATE
+        )
+      SQL
+      @conn.execute "DROP SEQUENCE test_employees_seq" rescue nil
+      @conn.execute <<-SQL
+        CREATE SEQUENCE test_employees_seq  MINVALUE 1
+          INCREMENT BY 1 START WITH 1 CACHE 20 NOORDER NOCYCLE
+      SQL
+      @employee = Class.new(ActiveRecord::Base) do
+        self.table_name = :test_employees
+      end
+      i = 0
+      @employee.create!(sort_order: i+=1, first_name: 'Peter',   last_name: 'Parker')
+      @employee.create!(sort_order: i+=1, first_name: 'Tony',    last_name: 'Stark')
+      @employee.create!(sort_order: i+=1, first_name: 'Steven',  last_name: 'Rogers')
+      @employee.create!(sort_order: i+=1, first_name: 'Bruce',   last_name: 'Banner')
+      @employee.create!(sort_order: i+=1, first_name: 'Natasha', last_name: 'Romanova')
     end
 
-    it "should return TrueClass or FalseClass" do
-      @adapter.is_integer_column?("adapter_id").should be_a TrueClass
-      @adapter.is_integer_column?("").should be_a FalseClass
+    after(:all) do
+      @conn.execute "DROP TABLE test_employees"
+      @conn.execute "DROP SEQUENCE test_employees_seq"
     end
 
-    it "should return true if name is 'id'" do
-      @adapter.is_integer_column?("id").should be_true
+    after(:each) do
+      ActiveRecord::Base.connection.clear_ignored_table_columns
+      ActiveRecord::Base.clear_cache! if ActiveRecord::Base.respond_to?(:"clear_cache!")
     end
 
-    it "should return true if name ends with '_id'" do
-      @adapter.is_integer_column?("_id").should be_true
-      @adapter.is_integer_column?("foo_id").should be_true
+    it "should return n records with limit(n)" do
+      @employee.limit(3).to_a.size.should be(3)
     end
 
-    it "should return false if name is 'something_else'" do
-      @adapter.is_integer_column?("something_else").should be_false
+    it "should return less than n records with limit(n) if there exist less than n records" do
+      @employee.limit(10).to_a.size.should be(5)
+    end
+
+    it "should return the records starting from offset n with offset(n)" do
+      expect(@employee.order(:sort_order).first.first_name.should).to eq("Peter")
+      expect(@employee.order(:sort_order).offset(0).first.first_name.should).to eq("Peter")
+      expect(@employee.order(:sort_order).offset(1).first.first_name.should).to eq("Tony")
+      expect(@employee.order(:sort_order).offset(4).first.first_name.should).to eq("Natasha")
     end
   end
 
+  describe 'serialized column' do
+
+    before(:all) do
+      schema_define do
+        create_table :test_serialized_columns do |t|
+          t.text :serialized
+        end
+      end
+      class ::TestSerializedColumn < ActiveRecord::Base
+        serialize :serialized, Array
+      end
+    end
+
+    after(:all) do
+      schema_define do
+        drop_table :test_serialized_columns
+      end
+      Object.send(:remove_const, 'TestSerializedColumn')
+      ActiveRecord::Base.table_name_prefix = nil
+      ActiveRecord::Base.clear_cache! if ActiveRecord::Base.respond_to?(:"clear_cache!")
+    end
+
+    before(:each) do
+      set_logger
+    end
+
+    after(:each) do
+      clear_logger
+    end
+
+    it 'should serialize' do
+      new_value = 'new_value'
+      serialized_column = TestSerializedColumn.new
+
+      expect(serialized_column.serialized.should).to eq([])
+      serialized_column.serialized << new_value
+      expect(serialized_column.serialized.should).to eq([new_value])
+      serialized_column.save
+      expect(serialized_column.save!.should).to eq(true)
+
+      serialized_column.reload
+      expect(serialized_column.serialized.should).to eq([new_value])
+      serialized_column.serialized = []
+      expect(serialized_column.save!.should).to eq(true)
+    end
+  end
 end

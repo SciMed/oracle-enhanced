@@ -10,7 +10,7 @@ module ActiveRecord #:nodoc:
           "CREATE SEQUENCE \"#{seq}\""
         end
         select_values("SELECT table_name FROM all_tables t
-                    WHERE owner = SYS_CONTEXT('userenv', 'session_user') AND secondary = 'N'
+                    WHERE owner = SYS_CONTEXT('userenv', 'current_schema') AND secondary = 'N'
                       AND NOT EXISTS (SELECT mv.mview_name FROM all_mviews mv WHERE mv.owner = t.owner AND mv.mview_name = t.table_name)
                       AND NOT EXISTS (SELECT mvl.log_table FROM all_mview_logs mvl WHERE mvl.log_owner = t.owner AND mvl.log_table = t.table_name)
                     ORDER BY 1").each do |table_name|
@@ -34,6 +34,8 @@ module ActiveRecord #:nodoc:
           structure << ddl
           structure << structure_dump_indexes(table_name)
           structure << structure_dump_unique_keys(table_name)
+          structure << structure_dump_table_comments(table_name)
+          structure << structure_dump_column_comments(table_name)
         end
 
         join_with_statement_token(structure) << structure_dump_fk_constraints
@@ -77,7 +79,7 @@ module ActiveRecord #:nodoc:
               ON a.constraint_name = c.constraint_name
            WHERE c.table_name = '#{table.upcase}'
              AND c.constraint_type = 'P'
-             AND c.owner = SYS_CONTEXT('userenv', 'session_user')
+             AND c.owner = SYS_CONTEXT('userenv', 'current_schema')
         SQL
         pks.each do |row|
           opts[:name] = row['constraint_name']
@@ -95,14 +97,15 @@ module ActiveRecord #:nodoc:
               ON a.constraint_name = c.constraint_name
            WHERE c.table_name = '#{table.upcase}'
              AND c.constraint_type = 'U'
-             AND c.owner = SYS_CONTEXT('userenv', 'session_user')
+             AND c.owner = SYS_CONTEXT('userenv', 'current_schema')
         SQL
         uks.each do |uk|
           keys[uk['constraint_name']] ||= []
           keys[uk['constraint_name']][uk['position']-1] = uk['column_name']
         end
         keys.map do |k,v|
-          "ALTER TABLE #{table.upcase} ADD CONSTRAINT #{k} UNIQUE (#{v.join(',')})"
+          quoted_column_names = v.map { |e| quote_column_name_or_expression(e) }.join(',')
+          "ALTER TABLE #{quote_table_name(table)} ADD CONSTRAINT #{quote_column_name(k)} UNIQUE (#{quoted_column_names})"
         end
       end
 
@@ -123,7 +126,7 @@ module ActiveRecord #:nodoc:
       end
 
       def structure_dump_fk_constraints #:nodoc:
-        fks = select_all("SELECT table_name FROM all_tables WHERE owner = SYS_CONTEXT('userenv', 'session_user') ORDER BY 1").map do |table|
+        fks = select_all("SELECT table_name FROM all_tables WHERE owner = SYS_CONTEXT('userenv', 'current_schema') ORDER BY 1").map do |table|
           if respond_to?(:foreign_keys) && (foreign_keys = foreign_keys(table["table_name"])).any?
             foreign_keys.map do |fk|
               sql = "ALTER TABLE #{quote_table_name(fk.from_table)} ADD CONSTRAINT #{quote_column_name(fk.options[:name])} "
@@ -134,11 +137,58 @@ module ActiveRecord #:nodoc:
         join_with_statement_token(fks)
       end
 
-      def dump_schema_information #:nodoc:
-        sm_table = ActiveRecord::Migrator.schema_migrations_table_name
-        migrated = select_values("SELECT version FROM #{sm_table} ORDER BY version")
-        join_with_statement_token(migrated.map{|v| "INSERT INTO #{sm_table} (version) VALUES ('#{v}')" })
+      def structure_dump_table_comments(table_name)
+        comments = []
+        comment = table_comment(table_name)
+
+        unless comment.nil?
+          comments << "COMMENT ON TABLE #{quote_table_name(table_name)} IS '#{quote_string(comment)}'"
+        end
+
+        join_with_statement_token(comments)
       end
+
+      def structure_dump_column_comments(table_name)
+        comments = []
+        columns = select_values("SELECT column_name FROM user_tab_columns WHERE table_name = '#{table_name}' ORDER BY column_id")
+
+        columns.each do |column|
+          comment = column_comment(table_name, column)
+          unless comment.nil?
+            comments << "COMMENT ON COLUMN #{quote_table_name(table_name)}.#{quote_column_name(column)} IS '#{quote_string(comment)}'"
+          end
+        end
+
+        join_with_statement_token(comments)
+      end
+
+      def foreign_key_definition(to_table, options = {}) #:nodoc:
+        columns = Array(options[:column] || options[:columns])
+
+        if columns.size > 1
+          # composite foreign key
+          columns_sql = columns.map {|c| quote_column_name(c)}.join(',')
+          references = options[:references] || columns
+          references_sql = references.map {|c| quote_column_name(c)}.join(',')
+        else
+          columns_sql = quote_column_name(columns.first || "#{to_table.to_s.singularize}_id")
+          references = options[:references] ? options[:references].first : nil
+          references_sql = quote_column_name(options[:primary_key] || references || "id")
+        end
+
+        table_name = to_table
+
+        sql = "FOREIGN KEY (#{columns_sql}) REFERENCES #{quote_table_name(table_name)}(#{references_sql})"
+
+        case options[:dependent]
+        when :nullify
+          sql << " ON DELETE SET NULL"
+        when :delete
+          sql << " ON DELETE CASCADE"
+        end
+        sql
+      end
+
 
       # Extract all stored procedures, packages, synonyms and views.
       def structure_dump_db_stored_code #:nodoc:
@@ -147,14 +197,14 @@ module ActiveRecord #:nodoc:
                      FROM all_source
                     WHERE type IN ('PROCEDURE', 'PACKAGE', 'PACKAGE BODY', 'FUNCTION', 'TRIGGER', 'TYPE')
                       AND name NOT LIKE 'BIN$%'
-                      AND owner = SYS_CONTEXT('userenv', 'session_user') ORDER BY type").each do |source|
+                      AND owner = SYS_CONTEXT('userenv', 'current_schema') ORDER BY type").each do |source|
           ddl = "CREATE OR REPLACE   \n"
           select_all(%Q{
                   SELECT text
                     FROM all_source
                    WHERE name = '#{source['name']}'
                      AND type = '#{source['type']}'
-                     AND owner = SYS_CONTEXT('userenv', 'session_user')
+                     AND owner = SYS_CONTEXT('userenv', 'current_schema')
                    ORDER BY line
                 }).each do |row|
             ddl << row['text']
@@ -171,7 +221,7 @@ module ActiveRecord #:nodoc:
         # export synonyms
         select_all("SELECT owner, synonym_name, table_name, table_owner
                       FROM all_synonyms
-                     WHERE owner = SYS_CONTEXT('userenv', 'session_user') ").each do |synonym|
+                     WHERE owner = SYS_CONTEXT('userenv', 'current_schema') ").each do |synonym|
           structure << "CREATE OR REPLACE #{synonym['owner'] == 'PUBLIC' ? 'PUBLIC' : '' } SYNONYM #{synonym['synonym_name']}
 			FOR #{synonym['table_owner']}.#{synonym['table_name']}"
         end
@@ -184,7 +234,7 @@ module ActiveRecord #:nodoc:
           "DROP SEQUENCE \"#{seq}\""
         end
         select_values("SELECT table_name from all_tables t
-                    WHERE owner = SYS_CONTEXT('userenv', 'session_user') AND secondary = 'N'
+                    WHERE owner = SYS_CONTEXT('userenv', 'current_schema') AND secondary = 'N'
                       AND NOT EXISTS (SELECT mv.mview_name FROM all_mviews mv WHERE mv.owner = t.owner AND mv.mview_name = t.table_name)
                       AND NOT EXISTS (SELECT mvl.log_table FROM all_mview_logs mvl WHERE mvl.log_owner = t.owner AND mvl.log_table = t.table_name)
                     ORDER BY 1").each do |table|
@@ -196,7 +246,7 @@ module ActiveRecord #:nodoc:
       def temp_table_drop #:nodoc:
         join_with_statement_token(select_values(
                   "SELECT table_name FROM all_tables
-                    WHERE owner = SYS_CONTEXT('userenv', 'session_user') AND secondary = 'N' AND temporary = 'Y' ORDER BY 1").map do |table|
+                    WHERE owner = SYS_CONTEXT('userenv', 'current_schema') AND secondary = 'N' AND temporary = 'Y' ORDER BY 1").map do |table|
           "DROP TABLE \"#{table}\" CASCADE CONSTRAINTS"
         end)
       end
@@ -240,7 +290,6 @@ module ActiveRecord #:nodoc:
 
       def execute_structure_dump(string)
         string.split(STATEMENT_TOKEN).each do |ddl|
-          ddl.chop! if ddl[-1,1] == ';'
           execute(ddl) unless ddl.blank?
         end
       end
@@ -259,7 +308,7 @@ module ActiveRecord #:nodoc:
                AND table_name = '#{table.upcase}'
           SQL
         # feature not supported previous to 11g
-        rescue ActiveRecord::StatementInvalid => e
+        rescue ActiveRecord::StatementInvalid => _e
           []
         end
       end
